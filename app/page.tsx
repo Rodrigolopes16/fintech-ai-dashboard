@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
   ArrowUpRight, 
   ArrowDownRight, 
@@ -11,7 +11,11 @@ import {
   ArrowUpCircle,
   Sparkles,
   PlusCircle,
-  X
+  X,
+  Search,
+  Filter,
+  ArrowUpDown,
+  Calendar
 } from 'lucide-react';
 import FinancialChart from '@/components/FinancialChart';
 
@@ -20,17 +24,30 @@ interface Transacao {
   descricao: string;
   categoria: string;
   valor: number;
-  data: string;
+  data: string; // Formato YYYY-MM-DD
   tipo: 'entrada' | 'saida';
 }
 
+const CATEGORIAS_DISPONIVEIS = [
+  'Receita SaaS',
+  'Consultoria Dev',
+  'Infraestrutura',
+  'Ferramentas & Licenças',
+  'Marketing & Vendas',
+  'Operacional',
+  'Outros'
+];
+
+const TRANSACOES_INICIAIS: Transacao[] = [
+  { id: 1, descricao: 'Pagamento Cliente SaaS', categoria: 'Receita SaaS', valor: 4500, data: '2026-09-17', tipo: 'entrada' },
+  { id: 2, descricao: 'Servidores AWS', categoria: 'Infraestrutura', valor: 1280, data: '2026-09-16', tipo: 'saida' },
+  { id: 3, descricao: 'Licenças de Software', categoria: 'Ferramentas & Licenças', valor: 450, data: '2026-09-08', tipo: 'saida' },
+  { id: 4, descricao: 'Consultoria Dev', categoria: 'Consultoria Dev', valor: 3200, data: '2026-09-07', tipo: 'entrada' },
+];
+
 export default function Home() {
-  const [transacoes, setTransacoes] = useState<Transacao[]>([
-    { id: 1, descricao: 'Pagamento Cliente SaaS', categoria: 'Receita', valor: 4500, data: 'Hoje, 14:32', tipo: 'entrada' },
-    { id: 2, descricao: 'Servidores AWS', categoria: 'Infraestrutura', valor: 1280, data: 'Ontem, 09:15', tipo: 'saida' },
-    { id: 3, descricao: 'Licenças de Software', categoria: 'Ferramentas', valor: 450, data: '08/09/2026', tipo: 'saida' },
-    { id: 4, descricao: 'Consultoria Dev', categoria: 'Serviços', valor: 3200, data: '07/09/2026', tipo: 'entrada' },
-  ]);
+  const [transacoes, setTransacoes] = useState<Transacao[]>(TRANSACOES_INICIAIS);
+  const [carregado, setCarregado] = useState(false);
 
   // Modais
   const [modalTransacaoAberto, setModalTransacaoAberto] = useState(false);
@@ -38,13 +55,41 @@ export default function Home() {
   const [carregandoIa, setCarregandoIa] = useState(false);
   const [respostaIa, setRespostaIa] = useState('');
 
-  // Formulário de Nova Transação
+  // Formulário
   const [descricao, setDescricao] = useState('');
-  const [categoria, setCategoria] = useState('');
+  const [categoria, setCategoria] = useState(CATEGORIAS_DISPONIVEIS[0]);
   const [valor, setValor] = useState('');
+  const [dataTransacao, setDataTransacao] = useState(new Date().toISOString().split('T')[0]);
   const [tipo, setTipo] = useState<'entrada' | 'saida'>('entrada');
 
-  // Cálculos dinâmicos das métricas
+  // Filtros e Ordenação
+  const [busca, setBusca] = useState('');
+  const [filtroCategoria, setFiltroCategoria] = useState('Todas');
+  const [filtroTipo, setFiltroTipo] = useState<'todos' | 'entrada' | 'saida'>('todos');
+  const [ordenacao, setOrdenacao] = useState<'data-desc' | 'data-asc' | 'valor-desc' | 'valor-asc'>('data-desc');
+
+  // Recupera transações salvas no navegador
+  useEffect(() => {
+    try {
+      const salvas = localStorage.getItem('@fintech:transacoes');
+      if (salvas) {
+        setTransacoes(JSON.parse(salvas));
+      }
+    } catch (err) {
+      console.error('Falha ao carregar localStorage:', err);
+    } finally {
+      setCarregado(true);
+    }
+  }, []);
+
+  // Salva no localStorage sempre que houver alteração
+  useEffect(() => {
+    if (carregado) {
+      localStorage.setItem('@fintech:transacoes', JSON.stringify(transacoes));
+    }
+  }, [transacoes, carregado]);
+
+  // Cálculos dinâmicos
   const totalReceitas = transacoes
     .filter((t) => t.tipo === 'entrada')
     .reduce((acc, t) => acc + t.valor, 0);
@@ -55,28 +100,45 @@ export default function Home() {
 
   const saldoTotal = 45280 + totalReceitas - totalDespesas;
 
-  // Função para adicionar nova transação
+  // Filtragem e ordenação dinâmica
+  const transacoesFiltradas = useMemo(() => {
+    return transacoes
+      .filter((item) => {
+        const atendeBusca = item.descricao.toLowerCase().includes(busca.toLowerCase());
+        const atendeCategoria = filtroCategoria === 'Todas' || item.categoria === filtroCategoria;
+        const atendeTipo = filtroTipo === 'todos' || item.tipo === filtroTipo;
+        return atendeBusca && atendeCategoria && atendeTipo;
+      })
+      .sort((a, b) => {
+        if (ordenacao === 'data-desc') return new Date(b.data).getTime() - new Date(a.data).getTime();
+        if (ordenacao === 'data-asc') return new Date(a.data).getTime() - new Date(b.data).getTime();
+        if (ordenacao === 'valor-desc') return b.valor - a.valor;
+        if (ordenacao === 'valor-asc') return a.valor - b.valor;
+        return 0;
+      });
+  }, [transacoes, busca, filtroCategoria, filtroTipo, ordenacao]);
+
   const handleAdicionarTransacao = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!descricao || !valor || !categoria) return;
+    if (!descricao || !valor || !categoria || !dataTransacao) return;
 
     const nova: Transacao = {
       id: Date.now(),
       descricao,
       categoria,
       valor: parseFloat(valor),
-      data: 'Hoje, ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      data: dataTransacao,
       tipo
     };
 
     setTransacoes([nova, ...transacoes]);
     setDescricao('');
-    setCategoria('');
+    setCategoria(CATEGORIAS_DISPONIVEIS[0]);
     setValor('');
+    setDataTransacao(new Date().toISOString().split('T')[0]);
     setModalTransacaoAberto(false);
   };
 
-  // Chamada Real para a API de IA do Gemini (backend)
   const handleGerarAnaliseIA = async () => {
     setModalIaAberto(true);
     setCarregandoIa(true);
@@ -96,15 +158,21 @@ export default function Home() {
       } else {
         setRespostaIa('Não foi possível gerar a análise no momento. Verifique sua chave de API.');
       }
-    } catch (err) {
+    } catch {
       setRespostaIa('Erro de conexão ao gerar análise inteligente.');
     } finally {
       setCarregandoIa(false);
     }
   };
 
+  const formatarData = (dataStr: string) => {
+    const partes = dataStr.split('-');
+    if (partes.length === 3) return `${partes[2]}/${partes[1]}/${partes[0]}`;
+    return dataStr;
+  };
+
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-8 relative">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-8 relative">
       <div className="max-w-7xl mx-auto space-y-8">
         
         {/* Cabeçalho */}
@@ -136,7 +204,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Cards de Métricas Dinâmicos */}
+        {/* Cards de Métricas */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
             <div className="flex items-center justify-between text-slate-400 mb-4">
@@ -180,10 +248,10 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Gráfico de Fluxo de Caixa */}
-        <FinancialChart />
+        {/* Gráfico Dinâmico */}
+        <FinancialChart transacoes={transacoes} />
 
-        {/* Seção Inferior: IA + Tabela */}
+        {/* Seção Inferior: Insight + Tabela com Controles */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="bg-slate-900/80 border border-emerald-500/30 rounded-xl p-6 flex flex-col justify-between">
             <div>
@@ -203,8 +271,64 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
-            <h3 className="text-lg font-bold text-white mb-4">Últimas Transações</h3>
+          <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <h3 className="text-lg font-bold text-white">Últimas Transações</h3>
+              <span className="text-xs text-slate-400">Exibindo {transacoesFiltradas.length} de {transacoes.length}</span>
+            </div>
+
+            {/* Barra de Filtros */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
+                <input 
+                  type="text" 
+                  placeholder="Buscar descrição..." 
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-md pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="relative">
+                <Filter className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
+                <select 
+                  value={filtroCategoria}
+                  onChange={(e) => setFiltroCategoria(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-md pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer">
+                  <option value="Todas">Todas Categorias</option>
+                  {CATEGORIAS_DISPONIVEIS.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <select 
+                  value={filtroTipo}
+                  onChange={(e) => setFiltroTipo(e.target.value as 'todos' | 'entrada' | 'saida')}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-md px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer">
+                  <option value="todos">Todos os Tipos</option>
+                  <option value="entrada">Apenas Entradas (+)</option>
+                  <option value="saida">Apenas Saídas (-)</option>
+                </select>
+              </div>
+
+              <div className="relative">
+                <ArrowUpDown className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
+                <select 
+                  value={ordenacao}
+                  onChange={(e) => setOrdenacao(e.target.value as 'data-desc' | 'data-asc' | 'valor-desc' | 'valor-asc')}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-md pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer">
+                  <option value="data-desc">Mais Recentes</option>
+                  <option value="data-asc">Mais Antigas</option>
+                  <option value="valor-desc">Maior Valor</option>
+                  <option value="valor-asc">Menor Valor</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Tabela */}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="text-slate-400 border-b border-slate-800">
@@ -216,23 +340,35 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {transacoes.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3 flex items-center gap-3 text-white font-medium">
-                        {item.tipo === 'entrada' ? (
-                          <ArrowUpCircle className="h-5 w-5 text-emerald-400 shrink-0" />
-                        ) : (
-                          <ArrowDownCircle className="h-5 w-5 text-rose-400 shrink-0" />
-                        )}
-                        {item.descricao}
-                      </td>
-                      <td className="py-3 text-slate-400">{item.categoria}</td>
-                      <td className="py-3 text-slate-400">{item.data}</td>
-                      <td className={`py-3 text-right font-semibold ${item.tipo === 'entrada' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {item.tipo === 'entrada' ? '+' : '-'}R$ {item.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  {transacoesFiltradas.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-slate-500 text-sm">
+                        Nenhuma transação encontrada com os filtros selecionados.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    transacoesFiltradas.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3 flex items-center gap-3 text-white font-medium">
+                          {item.tipo === 'entrada' ? (
+                            <ArrowUpCircle className="h-5 w-5 text-emerald-400 shrink-0" />
+                          ) : (
+                            <ArrowDownCircle className="h-5 w-5 text-rose-400 shrink-0" />
+                          )}
+                          {item.descricao}
+                        </td>
+                        <td className="py-3">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                            {item.categoria}
+                          </span>
+                        </td>
+                        <td className="py-3 text-slate-400">{formatarData(item.data)}</td>
+                        <td className={`py-3 text-right font-semibold ${item.tipo === 'entrada' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {item.tipo === 'entrada' ? '+' : '-'}R$ {item.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -241,7 +377,7 @@ export default function Home() {
 
       </div>
 
-      {/* MODAL 1: Nova Transação */}
+      {/* MODAL 1: Adicionar Transação */}
       {modalTransacaoAberto && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4">
@@ -257,7 +393,7 @@ export default function Home() {
                 <label className="text-xs font-medium text-slate-400 block mb-1">Descrição</label>
                 <input 
                   type="text" 
-                  placeholder="Ex: Venda de Licença" 
+                  placeholder="Ex: Venda de Licença SaaS" 
                   value={descricao}
                   onChange={(e) => setDescricao(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
@@ -268,19 +404,20 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-medium text-slate-400 block mb-1">Categoria</label>
-                  <input 
-                    type="text" 
-                    placeholder="Ex: SaaS / Infra" 
+                  <select 
                     value={categoria}
                     onChange={(e) => setCategoria(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
-                    required
-                  />
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+                    {CATEGORIAS_DISPONIVEIS.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-slate-400 block mb-1">Valor (R$)</label>
                   <input 
                     type="number" 
+                    step="0.01"
                     placeholder="0.00" 
                     value={valor}
                     onChange={(e) => setValor(e.target.value)}
@@ -288,6 +425,19 @@ export default function Home() {
                     required
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-400 mb-1 flex items-center gap-1">
+                  <Calendar className="h-3.5 w-3.5 text-slate-400" /> Data da Transação
+                </label>
+                <input 
+                  type="date" 
+                  value={dataTransacao}
+                  onChange={(e) => setDataTransacao(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  required
+                />
               </div>
 
               <div>
@@ -320,7 +470,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 2: Análise da IA */}
+      {/* MODAL 2: Análise com IA */}
       {modalIaAberto && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-emerald-500/30 rounded-xl p-6 max-w-lg w-full shadow-2xl space-y-4">
@@ -337,11 +487,11 @@ export default function Home() {
             {carregandoIa ? (
               <div className="py-12 flex flex-col items-center justify-center gap-3">
                 <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-slate-400 text-sm animate-pulse">Conectando ao modelo Gemini 2.5 e analisando finanças...</p>
+                <p className="text-slate-400 text-sm animate-pulse">Consultando modelo Gemini e analisando finanças...</p>
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 text-slate-200 text-sm leading-relaxed">
+                <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 text-slate-200 text-sm leading-relaxed whitespace-pre-line">
                   {respostaIa}
                 </div>
                 <button 
