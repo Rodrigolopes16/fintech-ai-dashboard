@@ -15,7 +15,8 @@ import {
   Search,
   Filter,
   ArrowUpDown,
-  Calendar
+  Calendar,
+  Clock
 } from 'lucide-react';
 import FinancialChart from '@/components/FinancialChart';
 
@@ -55,20 +56,21 @@ export default function Home() {
   const [carregandoIa, setCarregandoIa] = useState(false);
   const [respostaIa, setRespostaIa] = useState('');
 
-  // Formulário
+  // Formulário de Nova Transação
   const [descricao, setDescricao] = useState('');
   const [categoria, setCategoria] = useState(CATEGORIAS_DISPONIVEIS[0]);
   const [valor, setValor] = useState('');
   const [dataTransacao, setDataTransacao] = useState(new Date().toISOString().split('T')[0]);
   const [tipo, setTipo] = useState<'entrada' | 'saida'>('entrada');
 
-  // Filtros e Ordenação
+  // Filtros, Busca e Ordenação
   const [busca, setBusca] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('Todas');
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'entrada' | 'saida'>('todos');
+  const [filtroPeriodo, setFiltroPeriodo] = useState<'todos' | '7d' | '30d' | 'mes_atual'>('todos');
   const [ordenacao, setOrdenacao] = useState<'data-desc' | 'data-asc' | 'valor-desc' | 'valor-asc'>('data-desc');
 
-  // Recupera transações salvas no navegador
+  // Recupera as transações do navegador ao carregar a página
   useEffect(() => {
     try {
       const salvas = localStorage.getItem('@fintech:transacoes');
@@ -76,7 +78,7 @@ export default function Home() {
         setTransacoes(JSON.parse(salvas));
       }
     } catch (err) {
-      console.error('Falha ao carregar localStorage:', err);
+      console.error('Falha ao ler dados do localStorage:', err);
     } finally {
       setCarregado(true);
     }
@@ -100,14 +102,34 @@ export default function Home() {
 
   const saldoTotal = 45280 + totalReceitas - totalDespesas;
 
-  // Filtragem e ordenação dinâmica
+  // Filtragem e ordenação dinâmica com período
   const transacoesFiltradas = useMemo(() => {
+    const hoje = new Date();
+
     return transacoes
       .filter((item) => {
         const atendeBusca = item.descricao.toLowerCase().includes(busca.toLowerCase());
         const atendeCategoria = filtroCategoria === 'Todas' || item.categoria === filtroCategoria;
         const atendeTipo = filtroTipo === 'todos' || item.tipo === filtroTipo;
-        return atendeBusca && atendeCategoria && atendeTipo;
+
+        // Lógica de período
+        let atendePeriodo = true;
+        if (filtroPeriodo !== 'todos') {
+          const dataItem = new Date(item.data + 'T00:00:00');
+          const diferencaDias = (hoje.getTime() - dataItem.getTime()) / (1000 * 3600 * 24);
+
+          if (filtroPeriodo === '7d') {
+            atendePeriodo = diferencaDias >= 0 && diferencaDias <= 7;
+          } else if (filtroPeriodo === '30d') {
+            atendePeriodo = diferencaDias >= 0 && diferencaDias <= 30;
+          } else if (filtroPeriodo === 'mes_atual') {
+            atendePeriodo = 
+              dataItem.getMonth() === hoje.getMonth() && 
+              dataItem.getFullYear() === hoje.getFullYear();
+          }
+        }
+
+        return atendeBusca && atendeCategoria && atendeTipo && atendePeriodo;
       })
       .sort((a, b) => {
         if (ordenacao === 'data-desc') return new Date(b.data).getTime() - new Date(a.data).getTime();
@@ -116,7 +138,7 @@ export default function Home() {
         if (ordenacao === 'valor-asc') return a.valor - b.valor;
         return 0;
       });
-  }, [transacoes, busca, filtroCategoria, filtroTipo, ordenacao]);
+  }, [transacoes, busca, filtroCategoria, filtroTipo, filtroPeriodo, ordenacao]);
 
   const handleAdicionarTransacao = (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,7 +181,7 @@ export default function Home() {
         setRespostaIa('Não foi possível gerar a análise no momento. Verifique sua chave de API.');
       }
     } catch {
-      setRespostaIa('Erro de conexão ao gerar análise inteligente.');
+      setRespostaIa('Erro de conexão ao comunicar com a inteligência artificial.');
     } finally {
       setCarregandoIa(false);
     }
@@ -277,8 +299,9 @@ export default function Home() {
               <span className="text-xs text-slate-400">Exibindo {transacoesFiltradas.length} de {transacoes.length}</span>
             </div>
 
-            {/* Barra de Filtros */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
+            {/* Barra de Filtros, Período, Busca e Ordenação */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
+              {/* 1. Busca */}
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
                 <input 
@@ -290,30 +313,47 @@ export default function Home() {
                 />
               </div>
 
+              {/* 2. Filtro de Período */}
+              <div className="relative">
+                <Clock className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
+                <select 
+                  value={filtroPeriodo}
+                  onChange={(e) => setFiltroPeriodo(e.target.value as 'todos' | '7d' | '30d' | 'mes_atual')}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-md pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer">
+                  <option value="todos">Todo Período</option>
+                  <option value="7d">Últimos 7 dias</option>
+                  <option value="30d">Últimos 30 dias</option>
+                  <option value="mes_atual">Este Mês</option>
+                </select>
+              </div>
+
+              {/* 3. Filtro por Categoria */}
               <div className="relative">
                 <Filter className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
                 <select 
                   value={filtroCategoria}
                   onChange={(e) => setFiltroCategoria(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-800 rounded-md pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer">
-                  <option value="Todas">Todas Categorias</option>
+                  <option value="Todas">Categorias</option>
                   {CATEGORIAS_DISPONIVEIS.map(cat => (
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>
               </div>
 
+              {/* 4. Filtro por Tipo */}
               <div>
                 <select 
                   value={filtroTipo}
                   onChange={(e) => setFiltroTipo(e.target.value as 'todos' | 'entrada' | 'saida')}
                   className="w-full bg-slate-900 border border-slate-800 rounded-md px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer">
-                  <option value="todos">Todos os Tipos</option>
-                  <option value="entrada">Apenas Entradas (+)</option>
-                  <option value="saida">Apenas Saídas (-)</option>
+                  <option value="todos">Tipos</option>
+                  <option value="entrada">Entradas (+)</option>
+                  <option value="saida">Saídas (-)</option>
                 </select>
               </div>
 
+              {/* 5. Ordenação */}
               <div className="relative">
                 <ArrowUpDown className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-500" />
                 <select 
@@ -328,7 +368,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Tabela */}
+            {/* Tabela de Transações */}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="text-slate-400 border-b border-slate-800">
